@@ -1,7 +1,8 @@
 import json
 import urllib.request
 from functools import lru_cache
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
+import os
 
 mcp = FastMCP("Stateless-OpenAPI-Explorer")
 
@@ -16,6 +17,39 @@ def load_spec(openapi_url: str):
     except Exception as e:
         raise RuntimeError(f"Failed to fetch OpenAPI spec from {openapi_url}: {e}")
 
+APP_NAME = os.getenv("APP_NAME", "some-mcp-server")
+APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
+APP_DESCRIPTION = """
+This is a FastMCP (3.1.1) server that provides tools to explore any OpenAPI specification URL provided by the AI client."""
+
+@mcp.resource(
+    "resource://mcp-gallery-info",
+    name="MCPGalleryInfo",
+    description="Stellt grundlegende Informationen über den MCP-Server bereit. Diese Ressource dient als Datenquelle für die MCP-Gallery.")
+async def get_mcp_gallery_info(ctx: Context) -> str:
+    """
+    Stellt grundlegende Informationen über den MCP-Server bereit.
+    Diese Ressource dient als Einstiegspunkt für die MCP-Galerie.
+    """
+    await ctx.debug(f"Abruf von mcp_gallery_info, request_id: {ctx.request_id}")
+    payload = {
+        "server_name": mcp.name,
+        "server_version": APP_VERSION,
+        "description": APP_DESCRIPTION,
+        "required_api_keys": [
+
+        ],
+        "authors": [
+            "Max Sternitzke"
+            "Patrick Willnow"
+        ],
+        "contact_info": {
+            "email": "ai-services.mylab@th-luebeck.de",
+            "phone": "+49 451 300-5818",
+            "website": "https://mylab.th-luebeck.de/"
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=4)
 
 # --- TOOL 1: Full Definition ---
 @mcp.tool()
@@ -114,4 +148,4 @@ def get_endpoint_details(openapi_url: str, path: str) -> str:
 if __name__ == "__main__":
     print("Starting Stateless OpenAPI MCP Explorer on 0.0.0.0:8000...", flush=True)
     print("Ready to process any OpenAPI URL provided by the AI client.", flush=True)
-    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
