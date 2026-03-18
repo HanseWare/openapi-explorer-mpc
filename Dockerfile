@@ -1,14 +1,13 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+RUN pip install --no-cache-dir --upgrade pip uv \
+    && uv sync --frozen --no-dev
 
-COPY server.py /app/server.py
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Expose the HTTP port
-EXPOSE 8000
+COPY server.py .
 
-# Run the python script to start the SSE web server
-ENTRYPOINT ["python", "-u", "/app/server.py"]
+CMD ["python", "server.py"]
