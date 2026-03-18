@@ -1,45 +1,37 @@
 import json
-import os
-import sys
 import urllib.request
+from functools import lru_cache
 from fastmcp import FastMCP
 
-mcp = FastMCP("OpenAPI-Explorer")
-
-SPEC_URL = os.getenv("OPENAPI_URL")
-SPEC_PATH = os.getenv("OPENAPI_FILE_PATH", "/app/openapi.json")
+mcp = FastMCP("Stateless-OpenAPI-Explorer")
 
 
-def load_spec():
-    if SPEC_URL:
-        try:
-            req = urllib.request.Request(SPEC_URL, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                return json.loads(response.read().decode('utf-8'))
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch OpenAPI spec from {SPEC_URL}: {e}")
-    else:
-        if not os.path.exists(SPEC_PATH):
-            raise FileNotFoundError(f"OpenAPI spec not found at {SPEC_PATH} and OPENAPI_URL was not provided.")
-        with open(SPEC_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+# Cache the last 10 downloaded specs so sequential tool calls are instant
+@lru_cache(maxsize=10)
+def load_spec(openapi_url: str):
+    try:
+        req = urllib.request.Request(openapi_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch OpenAPI spec from {openapi_url}: {e}")
 
 
 # --- TOOL 1: Full Definition ---
 @mcp.tool()
-def get_full_openapi_definition() -> str:
-    """Returns the complete OpenAPI JSON definition."""
-    return json.dumps(load_spec(), indent=2)
+def get_full_openapi_definition(openapi_url: str) -> str:
+    """Returns the complete OpenAPI JSON definition from the provided URL."""
+    return json.dumps(load_spec(openapi_url), indent=2)
 
 
 # --- TOOL 2: Category Filter ---
 @mcp.tool()
-def get_openapi_category(category: str) -> str:
+def get_openapi_category(openapi_url: str, category: str) -> str:
     """
     Returns a subset of the OpenAPI definition containing only the endpoints
-    that match the specified category (tag).
+    that match the specified category (tag) from the provided URL.
     """
-    spec = load_spec()
+    spec = load_spec(openapi_url)
     filtered_paths = {}
     paths = spec.get("paths", {})
 
@@ -65,13 +57,13 @@ def get_openapi_category(category: str) -> str:
 
 # --- TOOL 3: Endpoint Summary List ---
 @mcp.tool()
-def list_all_endpoints() -> str:
+def list_all_endpoints(openapi_url: str) -> str:
     """
-    Returns a summarized list of all available endpoints, including only
-    the HTTP method, the URL path, and a short description. Use this to
-    discover available API capabilities.
+    Returns a summarized list of all available endpoints from the provided URL,
+    including only the HTTP method, the URL path, and a short description.
+    Use this to discover available API capabilities.
     """
-    spec = load_spec()
+    spec = load_spec(openapi_url)
     summary = []
     paths = spec.get("paths", {})
 
@@ -80,7 +72,6 @@ def list_all_endpoints() -> str:
         for method, details in methods.items():
             if not isinstance(details, dict): continue
 
-            # Use 'summary' if available, otherwise fallback to 'description'
             description = details.get("summary") or details.get("description") or "No description provided."
 
             summary.append({
@@ -94,20 +85,18 @@ def list_all_endpoints() -> str:
 
 # --- TOOL 4: Specific Endpoint Details ---
 @mcp.tool()
-def get_endpoint_details(path: str) -> str:
+def get_endpoint_details(openapi_url: str, path: str) -> str:
     """
     Returns the full OpenAPI specification details for a single, specific
-    endpoint path (e.g., '/users/{id}'). This includes all HTTP methods
-    available on that path and the global components/schemas so you can
-    resolve references.
+    endpoint path (e.g., '/users/{id}') from the provided URL. This includes
+    all HTTP methods available on that path and the global components.
     """
-    spec = load_spec()
+    spec = load_spec(openapi_url)
     paths = spec.get("paths", {})
 
-    # Ensure exact match handling (sometimes APIs have trailing slashes)
     if path not in paths:
         return json.dumps({
-                              "error": f"Path '{path}' not found in the OpenAPI specification. Please check the exact spelling from the list_all_endpoints tool."})
+                              "error": f"Path '{path}' not found in the OpenAPI specification at {openapi_url}. Please check the exact spelling from the list_all_endpoints tool."})
 
     result = {
         "openapi": spec.get("openapi", "3.0.0"),
@@ -116,8 +105,6 @@ def get_endpoint_details(path: str) -> str:
         "paths": {
             path: paths[path]
         },
-        # We include components because the endpoint likely references schemas
-        # for its request bodies and responses (e.g., $ref: '#/components/schemas/User')
         "components": spec.get("components", {})
     }
 
@@ -125,32 +112,6 @@ def get_endpoint_details(path: str) -> str:
 
 
 if __name__ == "__main__":
-    # --- DEBUG & VALIDATION BLOCK ---
-    print("Starting OpenAPI MCP Explorer...", flush=True)
-    try:
-        if SPEC_URL:
-            print(f"Attempting to fetch OpenAPI spec from URL: {SPEC_URL}", flush=True)
-        else:
-            print(f"Attempting to read OpenAPI spec from local file: {SPEC_PATH}", flush=True)
-
-        spec = load_spec()
-
-        title = spec.get("info", {}).get("title", "Unknown API")
-        version = spec.get("info", {}).get("version", "Unknown Version")
-        paths_count = len(spec.get("paths", {}))
-
-        print("✅ SUCCESS: OpenAPI specification loaded and parsed correctly!", flush=True)
-        print(f"   - API Title:   {title}", flush=True)
-        print(f"   - API Version: {version}", flush=True)
-        print(f"   - Total Paths: {paths_count}", flush=True)
-        print(f"   - Tools Registered: 4", flush=True)
-
-    except Exception as e:
-        print(f"❌ FATAL ERROR: Could not load OpenAPI specification on startup.", flush=True)
-        print(f"   Details: {e}", flush=True)
-        print("Exiting container to prevent runtime failures.", flush=True)
-        sys.exit(1)
-        # --------------------------------
-
-    print("\nStarting SSE server on 0.0.0.0:8000...", flush=True)
+    print("Starting Stateless OpenAPI MCP Explorer on 0.0.0.0:8000...", flush=True)
+    print("Ready to process any OpenAPI URL provided by the AI client.", flush=True)
     mcp.run(transport="sse", host="0.0.0.0", port=8000)
